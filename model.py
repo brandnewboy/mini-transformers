@@ -48,7 +48,7 @@ the feed forward network consists of two linear layers with a ReLU activation fu
 '''
 class FeedForwardNetWork(nn.Module):
     def __init__(self):
-        super(self).__init__()
+        super().__init__()
         self.linear1 = nn.Linear(d_model, d_model * 4)
         self.ReLU = nn.ReLU()
         self.linear2 = nn.Linear(d_model * 4, d_model)
@@ -70,31 +70,32 @@ the attention weights are then used to compute the attention output.
 '''
 class ScaledDotProductAttention(nn.Module):
     def __init__(self):
-        super(self).__init__()
-        self.Wq = nn.Linear(d_model, d_model)
-        self.Wk = nn.Linear(d_model, d_model)
-        self.Wv = nn.Linear(d_model, d_model)
+        super().__init__()
+        self.Wq = nn.Linear(d_model, d_model // num_heads, bias=False)
+        self.Wk = nn.Linear(d_model, d_model // num_heads, bias=False)
+        self.Wv = nn.Linear(d_model, d_model // num_heads, bias=False)
         self.register_buffer('mask', torch.tril(torch.ones(context_length, context_length)))
 
     def forward(self, x):
+        B, T, C = x.shape  # Batch size, Time steps(current context_length), Channels(dimensions)
         Q = self.Wq(x)
         K = self.Wk(x)
         V = self.Wv(x)
 
-        attention = Q @ K.transpose(-2, -1) / math.sqrt(d_model // num_heads)
-        attention = attention.masked_fill(self.mask == 0, float('-inf'))
-        attention = F.softmax(attention, dim=-1)
-        attention = attention @ V
-        return attention
+        weights = Q @ K.transpose(-2, -1) / (1.0 / math.sqrt(K.size(-1)))
+        weights = weights.masked_fill(self.mask[:T, :T] == 0, float('-inf'))
+        weights = F.softmax(weights, dim=-1)
+        out = weights @ V
+        return out
 
 '''
 the multi head attention
 '''
 class MultiHeadAttention(nn.Module):
     def __init__(self):
-        super(self).__init__()
+        super().__init__()
         self.attention_heads = nn.ModuleList([ScaledDotProductAttention() for _ in range(num_heads)])
-        self.projection_layer = nn.Linear(d_model, d_model)
+        self.projection_layer = nn.Linear((d_model // num_heads) * num_heads, d_model)
         self.dropout = nn.Dropout(dropout)
 
 
@@ -110,7 +111,7 @@ the transformer block
 '''
 class TransformerBlock(nn.Module):
     def __init__(self):
-        super(self).__init__()
+        super().__init__()
         self.attention = MultiHeadAttention()
         self.feed_forward = FeedForwardNetWork()
         self.layer_norm1 = nn.LayerNorm(d_model)
@@ -127,7 +128,7 @@ class TransformerBlock(nn.Module):
 
 class Model(nn.Module):
     def __init__(self):
-        super(self).__init__()
+        super().__init__()
         self.token_embedding_table = nn.Embedding(max_token_value + 1, d_model)
         self.transformer_blocks = nn.ModuleList([TransformerBlock() for _ in range(num_blocks)])
         self.final_linear_layer = nn.Linear(d_model, max_token_value + 1)
@@ -160,12 +161,19 @@ class Model(nn.Module):
         return logits, loss
 
     def generate(self, idx, max_new_tokens=100):
+        # idx is (B,T) array of indices in the current context
         for _ in range(max_new_tokens):
+            # Crop idx to the max size of our positional embeddings table
             idx_crop = idx[:, -context_length:]
-            logits, loss = self.forward(idx_crop)
-            logits_last_time_step = logits[:, -1, :]
-            probs = F.softmax(logits_last_time_step, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
+            # Get predictions
+            logits, loss = self(idx_crop)
+            # Get the last time step from logits where the dimensions of the logits are (B,T,C)
+            logits_last_timestep = logits[:, -1, :]
+            # Apply softmax to get probabilities
+            probs = F.softmax(input=logits_last_timestep, dim=-1)
+            # Sample from the probabilities' distribution.
+            idx_next = torch.multinomial(input=probs, num_samples=1)
+            # Append the sampled indexes idx_next to idx
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
 
@@ -209,14 +217,14 @@ for iter in range(max_iters):
     optimizer.step()
 
 # save the model
-torch.save(model.state_dict(), "model.pth")
+torch.save(model.state_dict(), "data/model.pth")
 
 # Evaluate the model
 model.eval()
-start = 'the product is'
+start = 'The salesperson'
 start_ids = enc.encode(start)
-x = torch.tensor(start_ids, dtype=torch.long, device=device)
+x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 y = model.generate(x, max_new_tokens=100)
-print('-----------')
+print('---------------')
 print(enc.decode(y[0].tolist()))
-print('-----------')
+print('---------------')
