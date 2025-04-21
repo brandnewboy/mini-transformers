@@ -1,0 +1,222 @@
+import os
+import requests
+import math
+import tiktoken
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# Hyperparameters
+batch_size = 4
+context_length = 16
+d_model = 64
+num_blocks = 8
+num_heads = 4
+learning_rate = 1e-3
+dropout = 0.1
+max_iters = 500
+eval_interval = 50
+eval_iters = 20
+device = "cuda" if torch.cuda.is_available() else "cpu"
+TORCH_SEED = 1337
+torch.manual_seed(TORCH_SEED)
+
+
+# Load the training data
+if not os.path.exists("data/sales_textbook.txt"):
+    data_url = "https://huggingface.co/datasets/goendalf666/sales-textbook_for_convincing_and_selling/raw/main/sales_textbook.txt"
+    with open("data/sales_textbook.txt", "wb") as f:
+        f.write(requests.get(data_url).content)
+
+with open("data/sales_textbook.txt", "r") as f:
+        text = f.read()
+
+# tokenize the text
+enc = tiktoken.get_encoding('cl100k_base')
+tokenized_text = enc.encode(text)
+max_token_value = max(tokenized_text)
+
+# split into train and validation sets
+train_size = int(0.9 * len(tokenized_text))
+train_data = torch.tensor(tokenized_text[:train_size], dtype=torch.long)
+val_data = torch.tensor(tokenized_text[train_size:], dtype=torch.long)
+
+
+'''
+the feed forward network consists of two linear layers with a ReLU activation function in between.
+'''
+class FeedForwardNetWork(nn.Module):
+    def __init__(self):
+        super(self).__init__()
+        self.linear1 = nn.Linear(d_model, d_model * 4)
+        self.ReLU = nn.ReLU()
+        self.linear2 = nn.Linear(d_model * 4, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.ReLU(x)
+        x = self.linear2(x)
+        x = self.dropout(x)
+        return x
+
+'''
+the scaled dot product attention is a type of attention mechanism that is used in the transformer model.
+it use three inputs: Q, K, V.
+Q is the query, K is the key, V is the value.
+the attention mechanism is used to compute the attention weights between the query and the key.
+the attention weights are then used to compute the attention output.
+'''
+class ScaledDotProductAttention(nn.Module):
+    def __init__(self):
+        super(self).__init__()
+        self.Wq = nn.Linear(d_model, d_model)
+        self.Wk = nn.Linear(d_model, d_model)
+        self.Wv = nn.Linear(d_model, d_model)
+        self.register_buffer('mask', torch.tril(torch.ones(context_length, context_length)))
+
+    def forward(self, x):
+        Q = self.Wq(x)
+        K = self.Wk(x)
+        V = self.Wv(x)
+
+        attention = Q @ K.transpose(-2, -1) / math.sqrt(d_model // num_heads)
+        attention = attention.masked_fill(self.mask == 0, float('-inf'))
+        attention = F.softmax(attention, dim=-1)
+        attention = attention @ V
+        return attention
+
+'''
+the multi head attention
+'''
+class MultiHeadAttention(nn.Module):
+    def __init__(self):
+        super(self).__init__()
+        self.attention_heads = nn.ModuleList([ScaledDotProductAttention() for _ in range(num_heads)])
+        self.projection_layer = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+
+    def forward(self, x):
+        attention_outputs = [head(x) for head in self.attention_heads]
+        attention_output = torch.cat(attention_outputs, dim=-1)
+        attention_output = self.projection_layer(attention_output)
+        attention_output = self.dropout(attention_output)
+        return attention_output
+
+'''
+the transformer block
+'''
+class TransformerBlock(nn.Module):
+    def __init__(self):
+        super(self).__init__()
+        self.attention = MultiHeadAttention()
+        self.feed_forward = FeedForwardNetWork()
+        self.layer_norm1 = nn.LayerNorm(d_model)
+        self.layer_norm2 = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        attention_output = self.attention(x)
+        x = x + attention_output
+        x = self.layer_norm1(x)
+        feed_forward_output = self.feed_forward(x)
+        x = x + feed_forward_output
+        x = self.layer_norm2(x)
+        return x
+
+class Model(nn.Module):
+    def __init__(self):
+        super(self).__init__()
+        self.token_embedding_table = nn.Embedding(max_token_value + 1, d_model)
+        self.transformer_blocks = nn.ModuleList([TransformerBlock() for _ in range(num_blocks)])
+        self.final_linear_layer = nn.Linear(d_model, max_token_value + 1)
+
+    def forward(self, idx, targets=None):
+        B, T = idx.shape
+        token_embeddings = self.token_embedding_table(idx)
+        position_encoding_lookup_table = torch.zeros(context_length, d_model, device=device)  # initial with zeros with shape (context_length, d_model)
+        position = torch.arange(0, context_length, dtype=torch.float).unsqueeze(1)
+        # apply the sine & cosine
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        position_encoding_lookup_table[:, 0::2] = torch.sin(position * div_term)
+        position_encoding_lookup_table[:, 1::2] = torch.cos(position * div_term)
+        # position_encoding_lookup_table = position_encoding_lookup_table.unsqueeze(0).expand(batch_size, -1, -1)  # add batch to the first dimension
+        position_embeddings = position_encoding_lookup_table[:T, :].to(device)
+        x = token_embeddings + position_embeddings
+        for block in self.transformer_blocks:
+            x = block(x)
+
+        logits = self.final_linear_layer(x)
+
+        if targets is None:
+            loss = None
+        else:
+            B, T, C = logits.shape
+            logits = logits.view(B * T, C)
+            targets = targets.view(B * T)
+            # cross_entropy loss function will automatically apply softmax function to the logits
+            loss = F.cross_entropy(logits, targets)
+        return logits, loss
+
+    def generate(self, idx, max_new_tokens=100):
+        for _ in range(max_new_tokens):
+            idx_crop = idx[:, -context_length:]
+            logits, loss = self.forward(idx_crop)
+            logits_last_time_step = logits[:, -1, :]
+            probs = F.softmax(logits_last_time_step, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
+
+model = Model().to(device)
+
+def get_batch(split: str):
+    data = train_data if split == "train" else val_data
+    idx = torch.randint(len(data) - context_length, (batch_size,))
+    x = torch.stack([data[i:i + context_length] for i in idx])
+    y = torch.stack([data[i + 1:i + context_length + 1] for i in idx])
+    x, y = x.to(device), y.to(device)
+    return x, y
+
+@torch.no_grad()
+def estimate_loss():
+    out = {}
+    model.eval()
+    for split in ["train", "val"]:
+        losses = torch.zeros(eval_iters)
+        for k in range(eval_iters):
+            X, Y = get_batch(split)
+            logits, loss = model(X, Y)
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+tracked_losses = list()
+for iter in range(max_iters):
+    if iter % eval_interval == 0 or iter == max_iters - 1:
+        losses = estimate_loss()
+        tracked_losses.append(losses)
+        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+    xb, yb = get_batch("train")
+
+    xb, yb = get_batch('train')
+    logits, loss = model(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+# save the model
+torch.save(model.state_dict(), "model.pth")
+
+# Evaluate the model
+model.eval()
+start = 'the product is'
+start_ids = enc.encode(start)
+x = torch.tensor(start_ids, dtype=torch.long, device=device)
+y = model.generate(x, max_new_tokens=100)
+print('-----------')
+print(enc.decode(y[0].tolist()))
+print('-----------')
