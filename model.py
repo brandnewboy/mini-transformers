@@ -79,7 +79,7 @@ class ScaledDotProductAttention(nn.Module):
     def linear_attention(self, xq, xk, xv):
         pass
 
-    def attention(self, xq, xk, xv):
+    def attention(self, xq, xk, xv, T):
         weights = xq @ xk.transpose(-2, -1) / (1.0 / math.sqrt(xk.size(-1)))
         weights = weights.masked_fill(self.mask[:T, :T] == 0, float('-inf'))
         weights = F.softmax(weights, dim=-1)
@@ -107,7 +107,7 @@ class ScaledDotProductAttention(nn.Module):
         # out = weights @ V
 
         # beta out = self.attention(Q, K, V) ?? self.linear_attention(Q, K, V)
-        out = self.attention(Q, K, V)
+        out = self.attention(Q, K, V, T)
         return out
 
 class LinearAttention(nn.Module):
