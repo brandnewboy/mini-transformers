@@ -8,15 +8,10 @@ import torch.nn as nn
 my_model = Model()
 print(my_model)
 
-def freeze_layers(model, num_layers_to_freeze):
+def freeze_layers(model):
     for param in model.parameters():
         param.requires_grad = False
-    for i, block in enumerate(model.transformer_blocks):
-        if i < num_layers_to_freeze:
-            for param in block.parameters():
-                param.requires_grad = True
-    for param in model.final_linear_layer.parameters():
-        param.requires_grad = True
+
 
 # create LoRA layer
 class LoRALayer(nn.Module):
@@ -56,6 +51,8 @@ layers = []
 assign_lora = partial(LinearWithLoRA, rank=lora_rank, alpha=lora_alpha)
 
 if __name__ == "__main__":
+    freeze_layers(model=my_model)
+    print(my_model.named_modules())
     for layer in my_model.transformer_blocks:
         if lora_query:
             for i, linear in enumerate(layer.attention.attention_heads):
