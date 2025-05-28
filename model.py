@@ -24,12 +24,12 @@ torch.manual_seed(TORCH_SEED)
 
 
 # Load the training data
-if not os.path.exists("data/sales_textbook.txt"):
+if not os.path.exists("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt"):
     data_url = "https://huggingface.co/datasets/goendalf666/sales-textbook_for_convincing_and_selling/raw/main/sales_textbook.txt"
-    with open("data/sales_textbook.txt", "wb") as f:
+    with open("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt", "wb") as f:
         f.write(requests.get(data_url).content)
 
-with open("data/sales_textbook.txt", "r") as f:
+with open("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt", "r") as f:
         text = f.read()
 
 # tokenize the text
@@ -247,17 +247,43 @@ def train(model):
         loss.backward() # beta
         optimizer.step()
 
-# save the model
-def save_model(model):
+def save_model(model, type = 'all'):
     if not os.path.exists("data"):
         os.makedirs("data")
-    torch.save(model.state_dict(), "data/model.pth")
-# torch.save(model.state_dict(), "data/model.pth")
+    if type == 'all':
+        torch.save(model.state_dict(), "data/model.pth")
+        return
+    # Save token embedding weights
+    torch.save(model.token_embedding_table.state_dict(), "data/token_embedding.pth")
+    
+    # Save transformer block weights
+    for i, block in enumerate(model.transformer_blocks):
+        torch.save(block.state_dict(), f"data/transformer_block_{i}.pth")
+    
+    # Save final linear layer weights
+    torch.save(model.final_linear_layer.state_dict(), "data/final_linear.pth")
+
+
+def load_model(model, type = 'all'):
+    if type == 'all':
+        model.load_state_dict(torch.load("data/model.pth"))
+        return model
+    # Load token embedding weights
+    model.token_embedding_table.load_state_dict(torch.load("data/token_embedding.pth"))
+    
+    # Load transformer block weights
+    for i, block in enumerate(model.transformer_blocks):
+        block.load_state_dict(torch.load(f"data/transformer_block_{i}.pth"))
+    
+    # Load final linear layer weights
+    model.final_linear_layer.load_state_dict(torch.load("data/final_linear.pth"))
+    
+    return model
 
 # Evaluate the model
 def evaluate_model(model):
     model.eval()
-    start = 'The salesperson'
+    start = 'The'
     start_ids = enc.encode(start)
     x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
     y = model.generate(x, max_new_tokens=100)
@@ -265,9 +291,23 @@ def evaluate_model(model):
     print(enc.decode(y[0].tolist()))
     print('---------------')
 
+def trainModelForExport(_model):
+    _model.to(device)
+    train(_model)
+
 if __name__ == "__main__":
-    model = Model()
-    model.to(device)
-    train(model)
-    # save_model(model)
-    evaluate_model(model)
+    # model = Model()
+    # model.to(device)
+    # train(model)
+    #
+    # # Save the model using the new strategy
+    # save_model(model, 'all')
+    
+    # Create a new model instance and load weights
+    new_model = Model()
+    new_model.to(device)
+    new_model = load_model(new_model, 'all')
+    
+    # Evaluate the loaded model
+    evaluate_model(new_model)
+    # evaluate_model(model)
