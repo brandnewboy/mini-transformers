@@ -6,6 +6,9 @@ import torch.nn as nn
 
 
 my_model = Model()
+print('\n')
+print('===================================================================================')
+print('===================== your old model not with LoRA layers: ========================')
 print(my_model)
 
 def freeze_layers(model):
@@ -52,10 +55,13 @@ assign_lora = partial(LinearWithLoRA, rank=lora_rank, alpha=lora_alpha)
 
 if __name__ == "__main__":
     freeze_layers(model=my_model)
-    print(my_model.named_modules())
     for layer in my_model.transformer_blocks:
         if lora_query:
             for i, linear in enumerate(layer.attention.attention_heads):
                 lin = layer.attention.attention_heads[i].q_lin
                 layer.attention.attention_heads[i].q_lin = assign_lora(lin)
+
+    print('\n')
+    print('===================================================================================')
+    print('======================= your new model with LoRA layers: ==========================')
     print(my_model)

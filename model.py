@@ -24,13 +24,15 @@ torch.manual_seed(TORCH_SEED)
 
 
 # Load the training data
-if not os.path.exists("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt"):
-    data_url = "https://huggingface.co/datasets/goendalf666/sales-textbook_for_convincing_and_selling/raw/main/sales_textbook.txt"
-    with open("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt", "wb") as f:
-        f.write(requests.get(data_url).content)
+# if not os.path.exists("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt"):
+#     data_url = "https://huggingface.co/datasets/goendalf666/sales-textbook_for_convincing_and_selling/raw/main/sales_textbook.txt"
+#     with open("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt", "wb") as f:
+#         f.write(requests.get(data_url).content)
 
-with open("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt", "r") as f:
-        text = f.read()
+# with open("D:/Coding_Personal/py/LLM_Learn_Transformers/data/sales_textbook.txt", "r") as f:
+#         text = f.read()
+with open("sales_textbook.txt", "r") as f:
+    text = f.read()
 
 # tokenize the text
 enc = tiktoken.get_encoding('cl100k_base')
@@ -232,6 +234,7 @@ def estimate_loss(model):
 
 
 def train(model):
+    print('you are training the model now, please wait.........')
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     tracked_losses = list()
     for iter in range(max_iters):
@@ -252,21 +255,23 @@ def save_model(model, type = 'all'):
         os.makedirs("data")
     if type == 'all':
         torch.save(model.state_dict(), "data/model.pth")
-        return
-    # Save token embedding weights
-    torch.save(model.token_embedding_table.state_dict(), "data/token_embedding.pth")
-    
-    # Save transformer block weights
-    for i, block in enumerate(model.transformer_blocks):
-        torch.save(block.state_dict(), f"data/transformer_block_{i}.pth")
-    
-    # Save final linear layer weights
-    torch.save(model.final_linear_layer.state_dict(), "data/final_linear.pth")
+    else:
+        # Save token embedding weights
+        torch.save(model.token_embedding_table.state_dict(), "data/token_embedding.pth")
+
+        # Save transformer block weights
+        for i, block in enumerate(model.transformer_blocks):
+            torch.save(block.state_dict(), f"data/transformer_block_{i}.pth")
+
+        # Save final linear layer weights
+        torch.save(model.final_linear_layer.state_dict(), "data/final_linear.pth")
+    print("Model weights saved successfully.")
 
 
 def load_model(model, type = 'all'):
     if type == 'all':
         model.load_state_dict(torch.load("data/model.pth"))
+        # print(torch.load("data/model.pth"))
         return model
     # Load token embedding weights
     model.token_embedding_table.load_state_dict(torch.load("data/token_embedding.pth"))
@@ -281,13 +286,14 @@ def load_model(model, type = 'all'):
     return model
 
 # Evaluate the model
-def evaluate_model(model):
+def evaluate_model(model, prompt = 'The'):
     model.eval()
-    start = 'The'
+    start = prompt
     start_ids = enc.encode(start)
     x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
     y = model.generate(x, max_new_tokens=100)
-    print('---------------')
+    print('the model is generating text based on your prompt............')
+    print('the text is generated as follows: ---------------')
     print(enc.decode(y[0].tolist()))
     print('---------------')
 
@@ -295,19 +301,44 @@ def trainModelForExport(_model):
     _model.to(device)
     train(_model)
 
+class ExecutionType:
+    def __init__(self, _type = ''):
+        self.type = _type
+        self.INFERENCE = 'i' # 推理
+        self.TRAINING = 't' # 训练
+
+    def validate(self):
+        return self.INFERENCE == self.type or self.TRAINING == self.type if True else False
+
+    def is_inference(self):
+        return self.INFERENCE == self.type
+
+    def is_training(self):
+        return self.TRAINING == self.type
+
 if __name__ == "__main__":
-    # model = Model()
-    # model.to(device)
-    # train(model)
-    #
-    # # Save the model using the new strategy
-    # save_model(model, 'all')
-    
-    # Create a new model instance and load weights
-    new_model = Model()
-    new_model.to(device)
-    new_model = load_model(new_model, 'all')
-    
-    # Evaluate the loaded model
-    evaluate_model(new_model)
-    # evaluate_model(model)
+    exec_type = ExecutionType()
+    while not exec_type.validate():
+        _exec_type = input("Please input the execution type(i/t): ")
+        exec_type.type = _exec_type
+        if exec_type.validate():
+            continue
+        print("Please input the correct execution type(i/t): ")
+
+    if exec_type.is_training():
+        model = Model()
+        model.to(device)
+        train(model)
+
+        # Save the model using the new strategy
+        save_model(model, 'all')
+    elif exec_type.is_inference():
+        prompt = input("Please input the prompt: ")
+        print(f"your prompt is: {prompt}")
+        # Create a new model instance and load weights
+        new_model = Model()
+        new_model.to(device)
+        new_model = load_model(new_model, 'all')
+
+        # Evaluate the loaded model
+        evaluate_model(new_model)
