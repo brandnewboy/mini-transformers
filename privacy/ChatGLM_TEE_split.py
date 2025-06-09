@@ -7,15 +7,32 @@ from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttenti
 import shutil
 import json
 
+'''
+model:
+    transformer:
+        embedding:
+        rotary_pos_emb:
+        encoder:
+            layers:
+                0:
+                1:
+                ...
+                27:
+            final_layernorm:
+        output_layer:
+'''
 
 class ChatGLM2FirstHalf(nn.Module):
     def __init__(self, original_model, split_layer):
         super().__init__()
         self.config = original_model.config
-        self.embedding = original_model.embedding
-        self.rotary_pos_emb = original_model.rotary_pos_emb
-        self.encoder = nn.ModuleList(list(original_model.encoder.layers)[:split_layer])
-        self.final_layernorm = original_model.final_layernorm
+        # 通过 transformer 访问 embedding
+        self.embedding = original_model.transformer.embedding
+        # 通过 transformer 访问 rotary_pos_emb
+        self.rotary_pos_emb = original_model.transformer.rotary_pos_emb
+        self.encoder = nn.ModuleList(list(original_model.transformer.encoder.layers)[:split_layer])
+        # 通过 transformer 访问 final_layernorm
+        self.final_layernorm = original_model.transformer.encoder.final_layernorm
 
     def forward(
             self,
@@ -95,8 +112,8 @@ class ChatGLM2SecondHalf(nn.Module):
     def __init__(self, original_model, split_layer):
         super().__init__()
         self.config = original_model.config
-        self.encoder = nn.ModuleList(list(original_model.encoder.layers)[split_layer:])
-        self.output_layer = original_model.output_layer
+        self.encoder = nn.ModuleList(list(original_model.transformer.encoder.layers)[split_layer:])
+        self.output_layer = original_model.transformer.output_layer
 
     def forward(
             self,
@@ -187,7 +204,9 @@ class ChatGLM2Splitter:
             self.model_name_or_path, trust_remote_code=self.trust_remote_code
         )
         self.model = AutoModel.from_pretrained(
-            self.model_name_or_path, trust_remote_code=self.trust_remote_code
+            self.model_name_or_path,
+            trust_remote_code=self.trust_remote_code,
+            torch_dtype=torch.float16
         )
         self.config = self.model.config
         print(f"模型加载完成，总层数: {self.config.num_layers}")
@@ -211,6 +230,7 @@ class ChatGLM2Splitter:
 
         print(f"正在将模型分割为两部分，分割点: 第 {split_layer} 层")
 
+        print(self.model)
         # 创建分割后的模型
         first_half = ChatGLM2FirstHalf(self.model, split_layer)
         second_half = ChatGLM2SecondHalf(self.model, split_layer)
@@ -325,7 +345,10 @@ class ChatGLM2DistributedInference:
 
         # 加载配置
         config_path = os.path.join(self.first_half_dir, "config.json")
-        self.config = AutoConfig.from_pretrained(config_path, trust_remote_code=self.trust_remote_code)
+        self.config = AutoConfig.from_pretrained(config_path,
+                                                 trust_remote_code=self.trust_remote_code,
+                                                 torch_dtype = torch.float16
+                                                 )
 
         # 创建并加载前半部分模型
         print(f"加载前半部分模型 from: {self.first_half_dir} 到 {first_device}")
@@ -459,7 +482,7 @@ class ChatGLM2DistributedInference:
 # 使用示例
 if __name__ == "__main__":
     # 1. 分割模型
-    splitter = ChatGLM2Splitter()
+    splitter = ChatGLM2Splitter(model_name_or_path="F:\models")
     model, tokenizer = splitter.load_model()
 
     # 选择分割层（例如将28层模型分为前14层和后14层）
@@ -467,7 +490,7 @@ if __name__ == "__main__":
     first_half, second_half = splitter.split_model(split_layer)
 
     # 保存分割后的模型
-    output_dir = "./chatglm2_6b_split"
+    output_dir = "D:\Coding_Personal\py\LLM_Learn_Transformers\data\chatglm2_6b_split"
     first_half_dir, second_half_dir = splitter.save_split_models(
         first_half, second_half, output_dir, split_layer
     )
@@ -477,7 +500,7 @@ if __name__ == "__main__":
 
     # 加载模型到指定设备
     tokenizer, first_half_model, second_half_model = inference.load_models(
-        first_device="cuda:0", second_device="cuda:1"
+        first_device="cuda", second_device="cuda"
     )
 
     # 进行推理

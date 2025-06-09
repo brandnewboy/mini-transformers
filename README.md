@@ -1,4 +1,4 @@
-# 🌟 mini-transformer 简易 Transformer 复现项目 🚀
+# 🌟 mini-transformer 简易 Transformer 复现项目 & 模型分割(chatglm2-6b) 🚀
 
 ![Python](https://img.shields.io/badge/Python-3.11.0%2B-blue?logo=python)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0.1%2B-orange?logo=pytorch)
@@ -28,15 +28,13 @@ mini-transformer/
 ├── model_utils.py         # 🛠️ 模型工具函数
 ├── lora.py                # 📈 LoRA 相关代码
 ├── main.py                # 🚀 主程序入口
-├── _transformer.py        # 🤖 Transformer 相关代码
-├── demo.ipynb             # 📓 演示 Jupyter Notebook
-├── test.ipynb             # 🧐 测试 Jupyter Notebook
+├── demo.ipynb             # 📓 transformer -> Jupyter Notebook
 ├── README.md              # 📖 项目说明文档
 └── sales_textbook.txt     # 📖 销售教材文本数据
 ```
 
 ## 模型切片隐私保护 🛡️
-`privacy_slice.py` 中包含了一个模型切片的案例，通过将模型划分为多个部分，实现对模型隐私的保护。这一方法可以有效防止模型参数泄露，增强模型的安全性。
+`privacy` 中包含了一个模型切片的案例，通过将模型划分为多个部分，并将切片放入TEE实现对模型隐私的保护。这一方法可以有效防止模型参数泄露，增强模型的安全性。
 
 ## 未来计划
 目前很多切片与隐私部分的代码存在很大问题，后续会进行修改......
