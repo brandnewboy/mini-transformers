@@ -275,6 +275,14 @@ class ChatGLM2Splitter:
         shutil.copy(config_path, os.path.join(first_half_dir, "config.json"))
         shutil.copy(config_path, os.path.join(second_half_dir, "config.json"))
 
+        # 复制代码文件
+        code_files = ["configuration_chatglm.py", "modeling_chatglm.py", "tokenization_chatglm.py", "quantization.py"]
+        for file in code_files:
+            src_file = os.path.join(self.model_name_or_path, file)
+            if os.path.exists(src_file):
+                shutil.copy(src_file, first_half_dir)
+                shutil.copy(src_file, second_half_dir)
+
         # 保存分割信息
         split_info = {
             "split_layer": split_layer,
@@ -356,7 +364,7 @@ class ChatGLM2DistributedInference:
         self.first_half.load_state_dict(torch.load(
             os.path.join(self.first_half_dir, "pytorch_model.bin"),
             map_location=first_device
-        ))
+        ), strict=False)  # 设置 strict 为 False
         self.first_half.to(first_device)
         self.first_half.eval()
 
@@ -366,11 +374,17 @@ class ChatGLM2DistributedInference:
         self.second_half.load_state_dict(torch.load(
             os.path.join(self.second_half_dir, "pytorch_model.bin"),
             map_location=second_device
-        ))
+        ), strict=False)  # 设置 strict 为 False
         self.second_half.to(second_device)
         self.second_half.eval()
 
         print("分布式模型加载完成")
+        # 打印模型相关信息
+        print(f"模型配置:")
+        print(f"  - 总层数: {self.config.num_layers}")
+        print(f"  - 前半部分参数数量: {sum(p.numel() for p in self.first_half.parameters()):,}")
+        print(f"  - 后半部分参数数量: {sum(p.numel() for p in self.second_half.parameters()):,}")
+        print(f"  - 分割点: 第 {self.split_info['split_layer']} 层")
         return self.tokenizer, self.first_half, self.second_half
 
     @torch.no_grad()
