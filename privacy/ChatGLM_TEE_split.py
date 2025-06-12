@@ -6,7 +6,7 @@ from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTo
 from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 import shutil
 import json
-
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 '''
 model:
     transformer:
@@ -263,17 +263,17 @@ class ChatGLM2Splitter:
         # 保存模型权重
         print(f"保存前半部分模型到: {first_half_dir}")
         torch.save(first_half.state_dict(), os.path.join(first_half_dir, "pytorch_model.bin"))
-        # 保存tokenizer
-        if save_tokenizer:
-            print(f"前半部分tokenizer: {first_half_dir}")
-            self.tokenizer.save_pretrained(first_half_dir)
+        # # 保存tokenizer
+        # if save_tokenizer:
+        #     print(f"前半部分tokenizer: {first_half_dir}")
+        #     self.tokenizer.save_pretrained(first_half_dir)
 
         print(f"保存后半部分模型到: {second_half_dir}")
         torch.save(second_half.state_dict(), os.path.join(second_half_dir, "pytorch_model.bin"))
-        # 保存tokenizer
-        if save_tokenizer:
-            print(f"前半部分tokenizer: {second_half_dir}")
-            self.tokenizer.save_pretrained(second_half_dir)
+        # # 保存tokenizer
+        # if save_tokenizer:
+        #     print(f"前半部分tokenizer: {second_half_dir}")
+        #     self.tokenizer.save_pretrained(second_half_dir)
 
         # 保存配置文件
         config_path = os.path.join(output_dir, "config.json")
@@ -288,8 +288,9 @@ class ChatGLM2Splitter:
         for file in code_files:
             src_file = os.path.join(self.model_name_or_path, file)
             if os.path.exists(src_file):
-                shutil.copy(src_file, first_half_dir)
-                shutil.copy(src_file, second_half_dir)
+                # shutil.copy(src_file, first_half_dir)
+                # shutil.copy(src_file, second_half_dir)
+                shutil.copy(src_file, output_dir)
 
         # 保存分割信息
         split_info = {
@@ -315,7 +316,7 @@ class ChatGLM2Splitter:
 class ChatGLM2DistributedInference:
     """ChatGLM2-6B 分布式推理工具，使用分割后的模型进行推理"""
 
-    def __init__(self, first_half_dir: str, second_half_dir: str,
+    def __init__(self, dir: str,
                  tokenizer_dir: Optional[str] = None,
                  trust_remote_code: bool = True):
         """
@@ -327,13 +328,20 @@ class ChatGLM2DistributedInference:
             tokenizer_dir: tokenizer目录，若为None则使用first_half_dir
             trust_remote_code: 是否信任远程代码
         """
-        self.first_half_dir = first_half_dir
-        self.second_half_dir = second_half_dir
-        self.tokenizer_dir = tokenizer_dir or first_half_dir
+        self.dir = dir
+        self.first_half_dir = os.path.join(dir, "first_half")
+        self.second_half_dir = os.path.join(dir, "second_half")
+        self.tokenizer_dir = tokenizer_dir or dir
         self.trust_remote_code = trust_remote_code
 
+        print(f"dir is: {self.dir}")
+        print(f"first_half_dir is: {self.first_half_dir}")
+        print(f"second_half_dir is: {self.second_half_dir}")
+        print(f"tokenizer_dir is: {self.tokenizer_dir}")
+        print(f"trust_remote_code is: {self.trust_remote_code}")
         # 加载分割信息
-        split_info_path = os.path.dirname(first_half_dir) + "/split_info.json"
+        split_info_path = os.path.join(self.dir, "split_info.json")
+        print(f"split_info_path is: {split_info_path}")
         with open(split_info_path, "r") as f:
             self.split_info = json.load(f)
 
@@ -345,7 +353,7 @@ class ChatGLM2DistributedInference:
         self.second_half = None
         self.config = None
 
-    def load_models(self, first_device: str = "cuda:0", second_device: str = "cuda:1"):
+    def load_models(self, first_device: str = "cuda", second_device: str = "cuda"):
         """
         加载分割后的模型到指定设备
 
@@ -360,25 +368,30 @@ class ChatGLM2DistributedInference:
         )
 
         # 加载配置
-        config_path = os.path.join(self.first_half_dir, "config.json")
-        self.config = AutoConfig.from_pretrained(config_path,
+        # config_path = os.path.join(self.dir, "config.json").replace('\\', '/')  # 替换反斜杠为正斜杠
+        self.config = AutoConfig.from_pretrained(self.dir,
                                                  trust_remote_code=self.trust_remote_code,
                                                  torch_dtype = torch.float16
                                                  )
+        # 日志输出配置信息
+        # print(f"加载配置 from: {config_path}")
+        print(f"配置信息:")
+        print(f"  - : {self.config}")
 
+        torch.cuda.empty_cache()
         # 创建并加载前半部分模型
         print(f"加载前半部分模型 from: {self.first_half_dir} 到 {first_device}")
-        self.first_half = ChatGLM2FirstHalf(AutoModel.from_config(self.config), self.split_info['split_layer'])
+        self.first_half = ChatGLM2FirstHalf(AutoModel.from_config(self.config, trust_remote_code=True), self.split_info['split_layer'])
         self.first_half.load_state_dict(torch.load(
             os.path.join(self.first_half_dir, "pytorch_model.bin"),
             map_location=first_device
-        ), strict=False)  # 设置 strict 为 False
+        ), strict=False)# 设置 strict 为 False
         self.first_half.to(first_device)
         self.first_half.eval()
 
         # 创建并加载后半部分模型
         print(f"加载后半部分模型 from: {self.second_half_dir} 到 {second_device}")
-        self.second_half = ChatGLM2SecondHalf(AutoModel.from_config(self.config), self.split_info['split_layer'])
+        self.second_half = ChatGLM2SecondHalf(AutoModel.from_config(self.config, trust_remote_code=True), self.split_info['split_layer'])
         self.second_half.load_state_dict(torch.load(
             os.path.join(self.second_half_dir, "pytorch_model.bin"),
             map_location=second_device
@@ -503,22 +516,26 @@ class ChatGLM2DistributedInference:
 
 # 使用示例
 if __name__ == "__main__":
-    # 1. 分割模型
-    splitter = ChatGLM2Splitter(model_name_or_path="F:\models")
-    model, tokenizer = splitter.load_model()
-
-    # 选择分割层（例如将28层模型分为前14层和后14层）
-    split_layer = 14
-    first_half, second_half = splitter.split_model(split_layer)
-
-    # 保存分割后的模型
+    # # 1. 分割模型
+    # splitter = ChatGLM2Splitter(model_name_or_path="F:\models")
+    # model, tokenizer = splitter.load_model()
+    #
+    # # 选择分割层（例如将28层模型分为前14层和后14层）
+    # split_layer = 14
+    # first_half, second_half = splitter.split_model(split_layer)
+    #
+    # # 保存分割后的模型
     output_dir = "D:\Coding_Personal\py\LLM_Learn_Transformers\data\chatglm2_6b_split"
-    first_half_dir, second_half_dir = splitter.save_split_models(
-        first_half, second_half, output_dir, split_layer
-    )
+    # first_half_dir, second_half_dir = splitter.save_split_models(
+    #     first_half, second_half, output_dir, split_layer
+    # )
 
+    # ==============================================================================
+
+    # first_half_dir = os.path.join(os.path.dirname(__file__), "..", "data", "chatglm2_6b_split", "first_half")
+    # second_half_dir = os.path.join(os.path.dirname(__file__), "..", "data", "chatglm2_6b_split", "second_half")
     # 2. 使用分割后的模型进行推理
-    inference = ChatGLM2DistributedInference(first_half_dir, second_half_dir)
+    inference = ChatGLM2DistributedInference(output_dir)
 
     # 加载模型到指定设备
     tokenizer, first_half_model, second_half_model = inference.load_models(
