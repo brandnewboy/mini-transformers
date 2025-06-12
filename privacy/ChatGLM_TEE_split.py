@@ -7,7 +7,7 @@ from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTo
 from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 import shutil
 import json
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:108"
 '''
 model:
     transformer:
@@ -38,12 +38,12 @@ class ChatGLM2FirstHalf(nn.Module):
     def forward(
             self,
             input_ids: torch.LongTensor,
-            position_ids: Optional[torch.LongTensor] = None,
+            #position_ids: Optional[torch.LongTensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            #past_key_values: Optional[List[torch.FloatTensor]] = None,
             inputs_embeds: Optional[torch.FloatTensor] = None,
             use_cache: bool = False,
-            output_attentions: bool = False,
+            # output_attentions: bool = False,
             output_hidden_states: bool = False,
             return_dict: bool = True,
     ):
@@ -53,34 +53,35 @@ class ChatGLM2FirstHalf(nn.Module):
             inputs_embeds = self.embedding(input_ids)
 
         # 处理旋转位置编码
-        if position_ids is None:
-            position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
-            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
+        # if position_ids is None:
+        #     position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
+        #     position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
 
         # 计算KV缓存的长度
-        if past_key_values is not None:
-            past_length = past_key_values[0][0].shape[2]
-            position_ids = position_ids[:, past_length:]
+        # if past_key_values is not None:
+        #     past_length = past_key_values[0][0].shape[2]
+        #     position_ids = position_ids[:, past_length:]
 
         # 前向传播前半部分
         hidden_states = inputs_embeds
         presents = () if use_cache else None
-        all_self_attentions = () if output_attentions else None
+        # all_self_attentions = () if output_attentions else None
         all_hidden_states = () if output_hidden_states else None
 
         for i, layer in enumerate(self.encoder):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_past = past_key_values[i] if past_key_values is not None else None
+            # layer_past = past_key_values[i] if past_key_values is not None else None
 
             layer_outputs = layer(
                 hidden_states,
-                position_ids=position_ids,
+                # position_ids=position_ids,
                 attention_mask=attention_mask,
-                past_key_value=layer_past,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
+                rotary_pos_emb=self.rotary_pos_emb,  # 传递旋转位置编码
+                # past_key_value=layer_past,
+                # use_cache=use_cache,
+                # output_attentions=output_attentions,
             )
 
             hidden_states = layer_outputs[0]
@@ -88,8 +89,8 @@ class ChatGLM2FirstHalf(nn.Module):
             if use_cache:
                 presents = presents + (layer_outputs[1],)
 
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[2 if use_cache else 1],)
+            # if output_attentions:
+            #     all_self_attentions = all_self_attentions + (layer_outputs[2 if use_cache else 1],)
 
         # 应用最后的层归一化
         hidden_states = self.final_layernorm(hidden_states)
@@ -97,15 +98,15 @@ class ChatGLM2FirstHalf(nn.Module):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        if not return_dict:
-            return tuple(
-                v for v in [hidden_states, presents, all_hidden_states, all_self_attentions] if v is not None)
+        # if not return_dict:
+        #     return tuple(
+        #         v for v in [hidden_states, presents, all_hidden_states, all_self_attentions] if v is not None)
 
         return BaseModelOutputWithPastAndCrossAttentions(
             last_hidden_state=hidden_states,
-            past_key_values=presents,
+            # past_key_values=presents,
             hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            # attentions=all_self_attentions,
         )
 
 
@@ -119,64 +120,66 @@ class ChatGLM2SecondHalf(nn.Module):
     def forward(
             self,
             hidden_states: torch.FloatTensor,
-            position_ids: Optional[torch.LongTensor] = None,
+            rotary_pos_emb,
+            #position_ids: Optional[torch.LongTensor] = None,
             attention_mask: Optional[torch.Tensor] = None,
-            past_key_values: Optional[List[torch.FloatTensor]] = None,
-            use_cache: bool = False,
-            output_attentions: bool = False,
-            output_hidden_states: bool = False,
-            return_dict: bool = True,
+            #past_key_values: Optional[List[torch.FloatTensor]] = None,
+            # use_cache: bool = False,
+            # output_attentions: bool = False,
+            # output_hidden_states: bool = False,
+            # return_dict: bool = True,
     ):
         batch_size, seq_length = hidden_states.shape[:2]
 
         # 处理旋转位置编码
-        if position_ids is None:
-            position_ids = torch.arange(seq_length, dtype=torch.long, device=hidden_states.device)
-            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
+        # if position_ids is None:
+        #     position_ids = torch.arange(seq_length, dtype=torch.long, device=hidden_states.device)
+        #     position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
 
         # 前向传播后半部分
-        presents = () if use_cache else None
-        all_self_attentions = () if output_attentions else None
-        all_hidden_states = () if output_hidden_states else None
+        # presents = () if use_cache else None
+        # all_self_attentions = () if output_attentions else None
+        # all_hidden_states = () if output_hidden_states else None
 
         for i, layer in enumerate(self.encoder):
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+            # if output_hidden_states:
+            #     all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_past = past_key_values[i] if past_key_values is not None else None
+            #layer_past = past_key_values[i] if past_key_values is not None else None
 
             layer_outputs = layer(
                 hidden_states,
-                position_ids=position_ids,
+                # position_ids=position_ids,
                 attention_mask=attention_mask,
-                past_key_value=layer_past,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
+                rotary_pos_emb=rotary_pos_emb,  # 传递旋转位置编码
+                #past_key_value=layer_past,
+                # use_cache=use_cache,
+                # output_attentions=output_attentions,
             )
 
             hidden_states = layer_outputs[0]
 
-            if use_cache:
-                presents = presents + (layer_outputs[1],)
+            # if use_cache:
+            #     presents = presents + (layer_outputs[1],)
 
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[2 if use_cache else 1],)
+            # if output_attentions:
+            #     all_self_attentions = all_self_attentions + (layer_outputs[2 if use_cache else 1],)
 
         # 应用输出层（生成logits）
         logits = self.output_layer(hidden_states)
 
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
-        if not return_dict:
-            return tuple(v for v in [logits, hidden_states, presents, all_hidden_states, all_self_attentions] if
-                         v is not None)
+        # if output_hidden_states:
+        #     all_hidden_states = all_hidden_states + (hidden_states,)
+        #
+        # if not return_dict:
+        #     return tuple(v for v in [logits, hidden_states, presents, all_hidden_states, all_self_attentions] if
+        #                  v is not None)
 
         return {
             'logits': logits,
             'hidden_states': hidden_states,
-            'past_key_values': presents,
-            'attentions': all_self_attentions,
+            #'past_key_values': presents,
+            # 'attentions': all_self_attentions,
         }
 
 
@@ -365,14 +368,16 @@ class ChatGLM2DistributedInference:
         # 加载tokenizer
         print(f"加载tokenizer from: {self.tokenizer_dir}")
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.tokenizer_dir, trust_remote_code=self.trust_remote_code
+            self.tokenizer_dir,
+            trust_remote_code=self.trust_remote_code
         )
 
         # 加载配置
         # config_path = os.path.join(self.dir, "config.json").replace('\\', '/')  # 替换反斜杠为正斜杠
         self.config = AutoConfig.from_pretrained(self.dir,
                                                  trust_remote_code=self.trust_remote_code,
-                                                 torch_dtype = torch.float16
+                                                 # torch_dtype = torch.float16
+                                                 torch_dtype = torch.float32
                                                  )
         # 日志输出配置信息
         # print(f"加载配置 from: {config_path}")
@@ -383,21 +388,29 @@ class ChatGLM2DistributedInference:
         # 创建并加载前半部分模型
         print(f"加载前半部分模型 from: {self.first_half_dir} 到 {first_device}")
         self.first_half = ChatGLM2FirstHalf(AutoModel.from_config(self.config, trust_remote_code=True), self.split_info['split_layer'])
-        self.first_half.load_state_dict(torch.load(
+        state_dict_first = torch.load(
             os.path.join(self.first_half_dir, "pytorch_model.bin"),
-            map_location=first_device
-        ), strict=False)# 设置 strict 为 False
-        self.first_half.to(first_device)
+            map_location=torch.device('cpu')
+        )
+        # 遍历状态字典，对每个张量调用 pin_memory 方法
+        state_dict_first = {k: v.pin_memory() for k, v in state_dict_first.items()}
+        self.first_half.load_state_dict(state_dict_first, strict=False)# 设置 strict 为 False
+        # self.first_half.to(first_device)
+        self.first_half.to('cpu')
         self.first_half.eval()
 
         # 创建并加载后半部分模型
         print(f"加载后半部分模型 from: {self.second_half_dir} 到 {second_device}")
         self.second_half = ChatGLM2SecondHalf(AutoModel.from_config(self.config, trust_remote_code=True), self.split_info['split_layer'])
-        self.second_half.load_state_dict(torch.load(
+        state_dict_second = torch.load(
             os.path.join(self.second_half_dir, "pytorch_model.bin"),
-            map_location=second_device
-        ), strict=False)  # 设置 strict 为 False
-        self.second_half.to(second_device)
+            map_location=torch.device('cpu')
+        )
+        # 遍历状态字典，对每个张量调用 pin_memory 方法
+        state_dict_second = {k: v.pin_memory() for k, v in state_dict_second.items()}
+        self.second_half.load_state_dict(state_dict_second, strict=False)  # 设置 strict 为 False
+        # self.second_half.to(second_device)
+        self.second_half.to('cpu')
         self.second_half.eval()
 
         print("分布式模型加载完成")
@@ -432,11 +445,11 @@ class ChatGLM2DistributedInference:
             self.load_models(first_device, second_device)
 
         # 编码输入
-        inputs = self.tokenizer(prompt, return_tensors="pt")
-        input_ids = inputs["input_ids"].to(first_device)
+        inputs = self.tokenizer(prompt, return_tensors="pt", padding=False)
+        input_ids = inputs["input_ids"] #.to(first_device)
         attention_mask = inputs.get("attention_mask", None)
         if attention_mask is not None:
-            attention_mask = attention_mask.to(first_device)
+            attention_mask = attention_mask #.to(first_device)
 
         # 初始化生成长度和KV缓存
         generated_ids = [input_ids[0].tolist()]
@@ -449,25 +462,34 @@ class ChatGLM2DistributedInference:
             first_outputs = self.first_half(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                use_cache=use_cache
+                # past_key_values=past_key_values,
+                # use_cache=use_cache
             )
 
             # 将中间结果移至后半部分模型设备
-            hidden_states = first_outputs.last_hidden_state.to(second_device)
+            hidden_states = first_outputs.last_hidden_state #.to(second_device)
             # TODO 存入文件，两部分之间通过该文件进行数据传输
-            if use_cache:
-                past_key_values = [
-                    (k.to(second_device), v.to(second_device))
-                    for k, v in first_outputs.past_key_values
-                ]
+            # 此处打印中间结果
+            print("================================================================================")
+            print(f"========================================中间结果=================================")
+            print(f"========================================中间结果=================================")
+            print(f"====================== \n{hidden_states} \n=================================")
+            print("================================================================================")
+            # if use_cache:
+            #     past_key_values = [
+            #         (k, #.to(second_device),
+            #          v #.to(second_device)
+            #          )
+            #         for k, v in first_outputs.past_key_values
+            #     ]
 
             # 后半部分模型推理
             second_outputs = self.second_half(
                 hidden_states=hidden_states,
-                attention_mask=attention_mask.to(second_device) if attention_mask is not None else None,
-                past_key_values=past_key_values,
-                use_cache=use_cache
+                # attention_mask=attention_mask.to(second_device) if attention_mask is not None else None,
+                attention_mask=attention_mask if attention_mask is not None else None,
+                # past_key_values=past_key_values,
+                # use_cache=use_cache
             )
 
             # 获取logits并计算下一个token
@@ -495,7 +517,8 @@ class ChatGLM2DistributedInference:
 
             # 更新注意力掩码
             if attention_mask is not None:
-                attention_mask = torch.cat([attention_mask, torch.ones((1, 1), device=first_device)], dim=1)
+                # attention_mask = torch.cat([attention_mask, torch.ones((1, 1), device=first_device)], dim=1)
+                attention_mask = torch.cat([attention_mask, torch.ones((1, 1))], dim=1)
 
             # 检查是否生成结束标记
             if next_token.item() == self.tokenizer.eos_token_id:
