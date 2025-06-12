@@ -1,3 +1,4 @@
+import argparse
 import os
 import torch
 import torch.nn as nn
@@ -516,8 +517,15 @@ class ChatGLM2DistributedInference:
 
 # 使用示例
 if __name__ == "__main__":
+    # 使用parameter获取参数
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="THUDM/chatglm2-6b", help="模型名称或路径")
+    parser.add_argument("--output_path", type=str, default="/home/split-data", help="分割模型保存路径")
+    args = parser.parse_args()
+
     # # 1. 分割模型
-    # splitter = ChatGLM2Splitter(model_name_or_path="F:\models")
+    # # splitter = ChatGLM2Splitter(model_name_or_path="F:\models")
+    # splitter = ChatGLM2Splitter(model_name_or_path=args.model)
     # model, tokenizer = splitter.load_model()
     #
     # # 选择分割层（例如将28层模型分为前14层和后14层）
@@ -525,7 +533,8 @@ if __name__ == "__main__":
     # first_half, second_half = splitter.split_model(split_layer)
     #
     # # 保存分割后的模型
-    output_dir = "D:\Coding_Personal\py\LLM_Learn_Transformers\data\chatglm2_6b_split"
+    # # output_dir = "D:\Coding_Personal\py\LLM_Learn_Transformers\data\chatglm2_6b_split"
+    output_dir = args.output_path
     # first_half_dir, second_half_dir = splitter.save_split_models(
     #     first_half, second_half, output_dir, split_layer
     # )
