@@ -263,9 +263,17 @@ class ChatGLM2Splitter:
         # 保存模型权重
         print(f"保存前半部分模型到: {first_half_dir}")
         torch.save(first_half.state_dict(), os.path.join(first_half_dir, "pytorch_model.bin"))
+        # 保存tokenizer
+        if save_tokenizer:
+            print(f"前半部分tokenizer: {first_half_dir}")
+            self.tokenizer.save_pretrained(first_half_dir)
 
         print(f"保存后半部分模型到: {second_half_dir}")
         torch.save(second_half.state_dict(), os.path.join(second_half_dir, "pytorch_model.bin"))
+        # 保存tokenizer
+        if save_tokenizer:
+            print(f"前半部分tokenizer: {second_half_dir}")
+            self.tokenizer.save_pretrained(second_half_dir)
 
         # 保存配置文件
         config_path = os.path.join(output_dir, "config.json")
@@ -295,10 +303,10 @@ class ChatGLM2Splitter:
         with open(os.path.join(output_dir, "split_info.json"), "w") as f:
             json.dump(split_info, f, indent=2)
 
-        # 保存tokenizer
-        if save_tokenizer:
-            print(f"保存tokenizer到: {output_dir}")
-            self.tokenizer.save_pretrained(output_dir)
+        # # 保存tokenizer
+        # if save_tokenizer:
+        #     print(f"保存tokenizer到: {output_dir}")
+        #     self.tokenizer.save_pretrained(output_dir)
 
         print(f"模型分割并保存完成，分割点: 第 {split_layer} 层")
         return first_half_dir, second_half_dir
