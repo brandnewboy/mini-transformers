@@ -67,7 +67,11 @@ class ChatGLM2FirstHalf(nn.Module):
         presents = () if use_cache else None
         # all_self_attentions = () if output_attentions else None
         all_hidden_states = () if output_hidden_states else None
-
+        # 生成旋转位置编码
+        rotary_pos_emb = self.rotary_pos_emb(seq_length)
+        # 转换 attention_mask 的数据类型
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(torch.float32)
         for i, layer in enumerate(self.encoder):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -78,7 +82,7 @@ class ChatGLM2FirstHalf(nn.Module):
                 hidden_states,
                 # position_ids=position_ids,
                 attention_mask=attention_mask,
-                rotary_pos_emb=self.rotary_pos_emb,  # 传递旋转位置编码
+                rotary_pos_emb=rotary_pos_emb,  # 传递旋转位置编码
                 # past_key_value=layer_past,
                 # use_cache=use_cache,
                 # output_attentions=output_attentions,
@@ -102,12 +106,13 @@ class ChatGLM2FirstHalf(nn.Module):
         #     return tuple(
         #         v for v in [hidden_states, presents, all_hidden_states, all_self_attentions] if v is not None)
 
-        return BaseModelOutputWithPastAndCrossAttentions(
+        return (BaseModelOutputWithPastAndCrossAttentions(
             last_hidden_state=hidden_states,
             # past_key_values=presents,
             hidden_states=all_hidden_states,
+
             # attentions=all_self_attentions,
-        )
+        ), rotary_pos_emb)
 
 
 class ChatGLM2SecondHalf(nn.Module):
@@ -140,7 +145,9 @@ class ChatGLM2SecondHalf(nn.Module):
         # presents = () if use_cache else None
         # all_self_attentions = () if output_attentions else None
         # all_hidden_states = () if output_hidden_states else None
-
+        # 转换 attention_mask 的数据类型
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(torch.float32)
         for i, layer in enumerate(self.encoder):
             # if output_hidden_states:
             #     all_hidden_states = all_hidden_states + (hidden_states,)
@@ -308,10 +315,10 @@ class ChatGLM2Splitter:
         with open(os.path.join(output_dir, "split_info.json"), "w") as f:
             json.dump(split_info, f, indent=2)
 
-        # # 保存tokenizer
-        # if save_tokenizer:
-        #     print(f"保存tokenizer到: {output_dir}")
-        #     self.tokenizer.save_pretrained(output_dir)
+        # 保存tokenizer
+        if save_tokenizer:
+            print(f"保存tokenizer到: {output_dir}")
+            self.tokenizer.save_pretrained(output_dir)
 
         print(f"模型分割并保存完成，分割点: 第 {split_layer} 层")
         return first_half_dir, second_half_dir
@@ -459,7 +466,7 @@ class ChatGLM2DistributedInference:
 
         for i in range(max_length):
             # 前半部分模型推理
-            first_outputs = self.first_half(
+            first_outputs, rotary_pos_emb = self.first_half(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 # past_key_values=past_key_values,
@@ -486,6 +493,7 @@ class ChatGLM2DistributedInference:
             # 后半部分模型推理
             second_outputs = self.second_half(
                 hidden_states=hidden_states,
+                rotary_pos_emb=rotary_pos_emb,
                 # attention_mask=attention_mask.to(second_device) if attention_mask is not None else None,
                 attention_mask=attention_mask if attention_mask is not None else None,
                 # past_key_values=past_key_values,
@@ -508,20 +516,34 @@ class ChatGLM2DistributedInference:
             # 应用采样
             sorted_probs = sorted_probs.masked_fill(sorted_indices_to_remove, 0.0)
             sorted_probs = sorted_probs / sorted_probs.sum()
+            # 确保 sorted_probs 是一维张量
+            sorted_probs = sorted_probs.squeeze()
+            sorted_indices = sorted_indices.squeeze()
+
             next_token_idx = torch.multinomial(sorted_probs, num_samples=1)
-            next_token = sorted_indices[0, next_token_idx].unsqueeze(0)
+
+            # 确保 next_token 是单元素张量列表
+            next_tokens = []
+            for b in range(sorted_probs.size(0)):
+                next_token = sorted_indices[b, next_token_idx[b, 0]].unsqueeze(0)
+                next_tokens.append(next_token)
+            next_tokens = torch.stack(next_tokens, dim=0)
+
+            # 假设我们只处理 batch 中的第一个样本
+            next_token = next_tokens[0].unsqueeze(0)
+            next_token_value = next_token.item()
 
             # 更新生成的ids和输入
-            generated_ids[0].append(next_token.item())
-            input_ids = next_token.to(first_device)
+            generated_ids[0].append(next_token_value)
+            input_ids = next_token[0].unsqueeze(0)#.to(first_device)
 
             # 更新注意力掩码
             if attention_mask is not None:
                 # attention_mask = torch.cat([attention_mask, torch.ones((1, 1), device=first_device)], dim=1)
-                attention_mask = torch.cat([attention_mask, torch.ones((1, 1))], dim=1)
+                attention_mask = torch.cat([attention_mask, torch.ones((1, 1)).bool()], dim=1)
 
             # 检查是否生成结束标记
-            if next_token.item() == self.tokenizer.eos_token_id:
+            if next_token_value == self.tokenizer.eos_token_id:
                 break
 
             # 定期打印进度
