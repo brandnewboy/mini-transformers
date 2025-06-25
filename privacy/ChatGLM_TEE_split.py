@@ -8,6 +8,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttenti
 import shutil
 import json
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:108"
+
 '''
 model:
     transformer:
@@ -37,82 +38,9 @@ class ChatGLM2FirstHalf(nn.Module):
 
     def forward(
             self,
-            input_ids: torch.LongTensor,
-            #position_ids: Optional[torch.LongTensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            #past_key_values: Optional[List[torch.FloatTensor]] = None,
-            inputs_embeds: Optional[torch.FloatTensor] = None,
-            use_cache: bool = False,
-            # output_attentions: bool = False,
-            output_hidden_states: bool = False,
-            return_dict: bool = True,
+
     ):
-        batch_size, seq_length = input_ids.shape
-
-        if inputs_embeds is None:
-            inputs_embeds = self.embedding(input_ids)
-
-        # 处理旋转位置编码
-        # if position_ids is None:
-        #     position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device)
-        #     position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
-
-        # 计算KV缓存的长度
-        # if past_key_values is not None:
-        #     past_length = past_key_values[0][0].shape[2]
-        #     position_ids = position_ids[:, past_length:]
-
-        # 前向传播前半部分
-        hidden_states = inputs_embeds
-        presents = () if use_cache else None
-        # all_self_attentions = () if output_attentions else None
-        all_hidden_states = () if output_hidden_states else None
-        # 生成旋转位置编码
-        rotary_pos_emb = self.rotary_pos_emb(seq_length)
-        # 转换 attention_mask 的数据类型
-        if attention_mask is not None:
-            attention_mask = attention_mask.to(torch.float32)
-        for i, layer in enumerate(self.encoder):
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
-
-            # layer_past = past_key_values[i] if past_key_values is not None else None
-
-            layer_outputs = layer(
-                hidden_states,
-                # position_ids=position_ids,
-                attention_mask=attention_mask,
-                rotary_pos_emb=rotary_pos_emb,  # 传递旋转位置编码
-                # past_key_value=layer_past,
-                # use_cache=use_cache,
-                # output_attentions=output_attentions,
-            )
-
-            hidden_states = layer_outputs[0]
-
-            if use_cache:
-                presents = presents + (layer_outputs[1],)
-
-            # if output_attentions:
-            #     all_self_attentions = all_self_attentions + (layer_outputs[2 if use_cache else 1],)
-
-        # 应用最后的层归一化
-        hidden_states = self.final_layernorm(hidden_states)
-
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
-        # if not return_dict:
-        #     return tuple(
-        #         v for v in [hidden_states, presents, all_hidden_states, all_self_attentions] if v is not None)
-
-        return (BaseModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=hidden_states,
-            # past_key_values=presents,
-            hidden_states=all_hidden_states,
-
-            # attentions=all_self_attentions,
-        ), rotary_pos_emb)
+        pass
 
 
 class ChatGLM2SecondHalf(nn.Module):
@@ -124,70 +52,9 @@ class ChatGLM2SecondHalf(nn.Module):
 
     def forward(
             self,
-            hidden_states: torch.FloatTensor,
-            rotary_pos_emb,
-            #position_ids: Optional[torch.LongTensor] = None,
-            attention_mask: Optional[torch.Tensor] = None,
-            #past_key_values: Optional[List[torch.FloatTensor]] = None,
-            # use_cache: bool = False,
-            # output_attentions: bool = False,
-            # output_hidden_states: bool = False,
-            # return_dict: bool = True,
+
     ):
-        batch_size, seq_length = hidden_states.shape[:2]
-
-        # 处理旋转位置编码
-        # if position_ids is None:
-        #     position_ids = torch.arange(seq_length, dtype=torch.long, device=hidden_states.device)
-        #     position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
-
-        # 前向传播后半部分
-        # presents = () if use_cache else None
-        # all_self_attentions = () if output_attentions else None
-        # all_hidden_states = () if output_hidden_states else None
-        # 转换 attention_mask 的数据类型
-        if attention_mask is not None:
-            attention_mask = attention_mask.to(torch.float32)
-        for i, layer in enumerate(self.encoder):
-            # if output_hidden_states:
-            #     all_hidden_states = all_hidden_states + (hidden_states,)
-
-            #layer_past = past_key_values[i] if past_key_values is not None else None
-
-            layer_outputs = layer(
-                hidden_states,
-                # position_ids=position_ids,
-                attention_mask=attention_mask,
-                rotary_pos_emb=rotary_pos_emb,  # 传递旋转位置编码
-                #past_key_value=layer_past,
-                # use_cache=use_cache,
-                # output_attentions=output_attentions,
-            )
-
-            hidden_states = layer_outputs[0]
-
-            # if use_cache:
-            #     presents = presents + (layer_outputs[1],)
-
-            # if output_attentions:
-            #     all_self_attentions = all_self_attentions + (layer_outputs[2 if use_cache else 1],)
-
-        # 应用输出层（生成logits）
-        logits = self.output_layer(hidden_states)
-
-        # if output_hidden_states:
-        #     all_hidden_states = all_hidden_states + (hidden_states,)
-        #
-        # if not return_dict:
-        #     return tuple(v for v in [logits, hidden_states, presents, all_hidden_states, all_self_attentions] if
-        #                  v is not None)
-
-        return {
-            'logits': logits,
-            'hidden_states': hidden_states,
-            #'past_key_values': presents,
-            # 'attentions': all_self_attentions,
-        }
+        pass
 
 
 class ChatGLM2Splitter:

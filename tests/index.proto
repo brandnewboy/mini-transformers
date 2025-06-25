@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package index;
+
+service Hello {
+  rpc SayHello (HelloRequest) returns (HelloResponse);
+}
+
+message HelloRequest {
+  string name = 1;
+  int32 age = 2;
+}
+
+message HelloResponse {
+  string yourName = 1;
+  string message = 2;
+}
+
+
+service Date {
+  rpc GetDate (DateRequest) returns (DateResponse);
+}
+
+message DateRequest {
+
+}
+
+message DateResponse {
+  int32 year = 1;
+  int32 month = 2;
+  int32 day = 3;
+}
