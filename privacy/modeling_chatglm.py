@@ -733,6 +733,8 @@ class Embedding(torch.nn.Module):
 class ChatGLMModel(ChatGLMPreTrainedModel):
     def __init__(self, config: ChatGLMConfig, device=None, empty_init=True):
         super().__init__(config)
+        # init_method的作用是初始化模型参数，empty_init的作用是是否使用空初始化，
+        #
         if empty_init:
             init_method = skip_init
         else:
