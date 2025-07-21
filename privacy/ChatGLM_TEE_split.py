@@ -487,12 +487,20 @@ def logits_to_text(logits, tokenizer):
     return text
 
 
-def first_inference(prompt_str, model_path, intermediate_data_file_path, hidden_states_file_path, device='cpu'):
+def first_inference(
+        prompt_str, model_path,
+        intermediate_data_file_path,
+        hidden_states_file_path,
+        device='cpu'
+):
     model_first, tokenizer = load_model(dir=model_path, model_clazz=ChatGLM2FirstHalf, device=device)
     model_first.eval()
     print(model_first)
     inputs = model_first.build_inputs(tokenizer, prompt_str)
     first_output, intermediate_data = model_first(**inputs)
+    '''
+    中间数据与中间层输出都需要进行文件保存或者数据库保存，或者进行网络传输
+    '''
     intermediate_data = {
         'full_attention_mask': intermediate_data['full_attention_mask'],
         'rotary_pos_emb': intermediate_data['rotary_pos_emb'],
